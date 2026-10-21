@@ -21,5 +21,16 @@ check "Межсетевой экран активен" "active" "$(sudo ufw stat
 check "Политика входящего трафика по умолчанию: deny" "deny" "$(sudo ufw status verbose | awk '/^Default:/{print $2}')"
 echo "[3] Учётные записи"
 awk -F: '$3>=1000 && $3<65534 {printf "    %s (uid=%s)\n",$1,$3}' /etc/passwd
+echo "[4] Веб-сервер"
+check "Служба Nginx активна" "active" "$(systemctl is-active nginx 2>/dev/null || true)"
+if sudo nginx -t >/dev/null 2>&1; then nginx_config="valid"; else nginx_config="invalid"; fi
+check "Конфигурация Nginx корректна" "valid" "$nginx_config"
+if sudo openssl x509 -in /etc/ssl/certs/devops.crt -checkend 2592000 -noout >/dev/null 2>&1; then cert_expiry="valid"; else cert_expiry="expired-or-missing"; fi
+check "Сертификат действует не менее 30 дней" "valid" "$cert_expiry"
+world_writable="$(sudo find /var/www/devops-site -perm -o+w -print -quit 2>/dev/null || true)"
+key_mode="$(sudo stat -c '%a' /etc/ssl/private/devops.key 2>/dev/null || true)"
+if sudo test -d /var/www/devops-site && [[ -z "$world_writable" && "$key_mode" == "600" ]]; then web_permissions="safe"; else web_permissions="unsafe"; fi
+check "Файлы сайта не доступны для общей записи, права ключа 600" "safe" "$web_permissions"
+
 echo "Пройдено: $PASS, не пройдено: $FAIL"
 [[ $FAIL -eq 0 ]] && exit 0 || exit 1
