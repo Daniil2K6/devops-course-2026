@@ -34,7 +34,7 @@ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
     exit 1
 fi
 
-RSYNC_ARGS=(-avz --delete --chmod=D755,F644 -e "ssh -o BatchMode=yes -o ConnectTimeout=5")
+RSYNC_ARGS=(-avz --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -o BatchMode=yes -o ConnectTimeout=5")
 if [[ "$DRY_RUN" == true ]]; then
     rsync "${RSYNC_ARGS[@]}" --dry-run "$LOCAL_DIR" "${REMOTE}:${REMOTE_DIR}/"
     exit 0
