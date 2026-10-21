@@ -84,7 +84,7 @@
 | 02-keys-configured | После настройки пользователя devops, ключей и ~/.ssh/config |
 | 03-ssh-hardened | После усиления SSH (задание 2); UFW настроен позднее |
 
-## 8. Восстановление после отката на снимок 01-clean-install
+## Восстановление после отката на снимок 01-clean-install
 
 Откат возвращает машину к состоянию после установки: пользователя `devops`, ключей, усиления SSH, UFW и имени узла нет, а проброс портов может вернуться к гостевому порту 22. Порядок восстановления:
 
@@ -100,3 +100,24 @@
 10. Проверить результат: `sudo sshd -T`, `sudo ss -tlnp | grep sshd`, `sudo ufw status verbose`, `hostname -f`, `ssh devops.local 'whoami; hostname -f'`, `bash scripts/audit.sh` (код возврата 0); при необходимости создать снимок `04-restored`.
 
 Ориентировочное время восстановления — 10–15 минут.
+
+## 8. Веб-сервер
+
+- Пакет: `nginx` из репозитория Ubuntu; служба: `nginx.service`.
+- Конфигурация ресурса: `/etc/nginx/sites-available/devops-site`; активная ссылка: `/etc/nginx/sites-enabled/devops-site`. Стандартная ссылка `default` отключена.
+- Имя ресурса: `devops.local`; каталог сайта: `/var/www/devops-site`, владелец `devops:devops`.
+- Права каталога сайта: `755`; права файлов: `644`. Пользователь рабочих процессов Nginx (`www-data`) имеет чтение и проход, но не запись.
+- Сертификат: `/etc/ssl/certs/devops.crt`, права `644`; закрытый ключ: `/etc/ssl/private/devops.key`, владелец `root:root`, права `600`.
+- Сертификат самоподписанный, RSA 2048 бит, срок действия 365 дней, SAN `DNS:devops.local`. Команда формирования:
+
+  ```bash
+  sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/devops.key \\
+    -out /etc/ssl/certs/devops.crt \\
+    -subj "/CN=devops.local" \\
+    -addext "subjectAltName=DNS:devops.local"
+  ```
+
+- Блок HTTP перенаправляет запросы на `https://$host$request_uri` кодом 301. HTTPS-блок использует TLS 1.2/1.3 и собственные журналы `/var/log/nginx/devops-site.access.log` и `/var/log/nginx/devops-site.error.log`.
+- После изменения конфигурации: `sudo nginx -t && sudo systemctl reload nginx`.
+- Для восстановления полного состояния см. шаги в этом разделе и снимок `04-nginx-https`.
