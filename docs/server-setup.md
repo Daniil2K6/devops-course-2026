@@ -131,25 +131,7 @@ rsync -avz --delete --chmod=D755,F644 \
 
 Состояние после настройки фиксируется снимком `04-nginx-https`.
 
-## 9. Восстановление после отката на снимок 01-clean-install
-
-Откат возвращает машину к состоянию после установки: пользователя `devops`, ключей, усиления SSH, UFW и имени узла нет, а проброс портов может вернуться к гостевому порту 22. Порядок восстановления:
-
-1. Остановить машину и восстановить снимок: `VBoxManage snapshot "devops-vm" restore "01-clean-install"` (или Средства → Снимки → Восстановить).
-2. Запустить машину и проверить адреса: `ip -brief address` — на `enp0s9` ожидается `192.168.56.3`.
-3. При необходимости вернуть проброс портов: для выключенной машины `VBoxManage modifyvm "devops-vm" --natpf1 "ssh,tcp,127.0.0.1,2222,,2222"`, для работающей — `VBoxManage controlvm "devops-vm" natpf1 "ssh,tcp,127.0.0.1,2222,,2222"`.
-4. Подключиться под `student` (порт 2222 либо 22 в зависимости от правила) и создать пользователя: `sudo adduser devops`, `sudo usermod -aG sudo devops`.
-5. Установить открытый ключ: `ssh-copy-id -i ~/.ssh/devops_vm.pub -p 2222 devops@127.0.0.1`; проверить права: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys`.
-6. Разместить `/etc/ssh/sshd_config.d/99-hardening.conf` с директивами из раздела 5; в `/etc/ssh/sshd_config.d/50-cloud-init.conf` закомментировать `PasswordAuthentication yes`.
-7. Проверить конфигурацию `sudo sshd -t`, затем отключить сокет и включить службу: `sudo systemctl disable --now ssh.socket`, `sudo systemctl enable --now ssh.service`, `sudo systemctl restart ssh`.
-8. Задать имя узла и запись hosts: `sudo hostnamectl set-hostname devops-vm`; в `/etc/hosts` добавить `127.0.1.1 devops-vm.devops.local devops-vm`.
-9. Настроить UFW в безопасном порядке: `sudo ufw allow 2222/tcp`, `sudo ufw allow 80/tcp`, `sudo ufw allow 443/tcp`, `sudo ufw default deny incoming`, `sudo ufw default allow outgoing`, `sudo ufw enable`, `sudo ufw delete allow 2222/tcp`, `sudo ufw limit 2222/tcp comment 'SSH rate-limited'`, `sudo ufw logging medium`.
-10. Проверить результат: `sudo sshd -T`, `sudo ss -tlnp | grep sshd`, `sudo ufw status verbose`, `hostname -f`, `ssh devops.local 'whoami; hostname -f'`, `bash scripts/audit.sh`; код возврата 0 достигается после настройки веб-сервера (раздел 8) и контейнеризации (раздел 10), иначе соответствующие проверки завершатся ошибкой. При необходимости создать снимок `04-restored`.
-
-Ориентировочное время восстановления — 10–15 минут.
-
-
-## 10. Контейнеризация (практическая работа № 7)
+## 9. Контейнеризация (практическая работа № 7)
 
 Это план конфигурации. Проверка 21.10.2026 обнаружила, что на доступной ВМ Docker и каталог `/home/devops/app` отсутствуют. Применение настроек ниже пока не подтверждено.
 
@@ -163,3 +145,20 @@ rsync -avz --delete --chmod=D755,F644 \
 - Сервисы Compose перезапускаются с политикой `unless-stopped`; приложение ожидает состояние `healthy` сервиса `db`.
 - Обратный прокси: в HTTPS-блоке `/etc/nginx/sites-available/devops-site` location `/app/` направляет запросы на `http://127.0.0.1:5000/` и передаёт заголовки `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`. После проверки `sudo nginx -t` применяется `sudo systemctl reload nginx`.
 - Перед окончательной сдачей замените сведения о версии Docker и группе `devops` фактическим выводом команд на сервере.
+
+## 10. Восстановление после отката на снимок 01-clean-install
+
+Откат возвращает машину к состоянию после установки: пользователя `devops`, ключей, усиления SSH, UFW и имени узла нет, а проброс портов может вернуться к гостевому порту 22. Порядок восстановления:
+
+1. Остановить машину и восстановить снимок: `VBoxManage snapshot "devops-vm" restore "01-clean-install"` (или Средства → Снимки → Восстановить).
+2. Запустить машину и проверить адреса: `ip -brief address` — на `enp0s9` ожидается `192.168.56.3`.
+3. При необходимости вернуть проброс портов: для выключенной машины `VBoxManage modifyvm "devops-vm" --natpf1 "ssh,tcp,127.0.0.1,2222,,2222"`, для работающей — `VBoxManage controlvm "devops-vm" natpf1 "ssh,tcp,127.0.0.1,2222,,2222"`.
+4. Подключиться под `student` (порт 2222 либо 22 в зависимости от правила) и создать пользователя: `sudo adduser devops`, `sudo usermod -aG sudo devops`.
+5. Установить открытый ключ: `ssh-copy-id -i ~/.ssh/devops_vm.pub -p 2222 devops@127.0.0.1`; проверить права: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys`.
+6. Разместить `/etc/ssh/sshd_config.d/99-hardening.conf` с директивами из раздела 5; в `/etc/ssh/sshd_config.d/50-cloud-init.conf` закомментировать `PasswordAuthentication yes`.
+7. Проверить конфигурацию `sudo sshd -t`, затем отключить сокет и включить службу: `sudo systemctl disable --now ssh.socket`, `sudo systemctl enable --now ssh.service`, `sudo systemctl restart ssh`.
+8. Задать имя узла и запись hosts: `sudo hostnamectl set-hostname devops-vm`; в `/etc/hosts` добавить `127.0.1.1 devops-vm.devops.local devops-vm`.
+9. Настроить UFW в безопасном порядке: `sudo ufw allow 2222/tcp`, `sudo ufw allow 80/tcp`, `sudo ufw allow 443/tcp`, `sudo ufw default deny incoming`, `sudo ufw default allow outgoing`, `sudo ufw enable`, `sudo ufw delete allow 2222/tcp`, `sudo ufw limit 2222/tcp comment 'SSH rate-limited'`, `sudo ufw logging medium`.
+10. Проверить результат: `sudo sshd -T`, `sudo ss -tlnp | grep sshd`, `sudo ufw status verbose`, `hostname -f`, `ssh devops.local 'whoami; hostname -f'`, `bash scripts/audit.sh`; код возврата 0 достигается после настройки веб-сервера (раздел 8) и контейнеризации (раздел 9), иначе соответствующие проверки завершатся ошибкой. При необходимости создать снимок `04-restored`.
+
+Ориентировочное время восстановления — 10–15 минут.
