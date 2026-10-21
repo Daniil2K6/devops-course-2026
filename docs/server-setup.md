@@ -84,7 +84,69 @@
 | 02-keys-configured | После настройки пользователя devops, ключей и ~/.ssh/config |
 | 03-ssh-hardened | После усиления SSH (задание 2); UFW настроен позднее |
 
-## Восстановление после отката на снимок 01-clean-install
+## 8. Веб-сервер
+
+Раздел описывает целевое состояние практики № 6: публикацию статического ресурса через Nginx, HTTPS с самоподписанным сертификатом и доставку содержимого средствами rsync. По результатам проверки 21.10.2026 на доступной ВМ `devops-vm` пакет `nginx` не установлен, каталог `/var/www/devops-site`, конфигурация ресурса и файл `~/devops.crt` на хосте отсутствуют. Настройки ниже ещё не применены и требуют выполнения на ВМ с правами root.
+
+- Устанавливаемый пакет: `nginx` из репозитория Ubuntu 24.04; служба `nginx.service`.
+- Конфигурация ресурса: `/etc/nginx/sites-available/devops-site`; активна символической ссылкой в `/etc/nginx/sites-enabled/`.
+- Стандартный ресурс Nginx отключён: ссылка `/etc/nginx/sites-enabled/default` удалена, файл конфигурации сохранён.
+- Каталог ресурса: `/var/www/devops-site`, владелец `devops:devops`. Каталоги имеют права `755`, файлы `644`; файлов с правом записи для всех нет. Пользователь `www-data` может читать ресурс, но не может изменять его.
+- Сертификат: `/etc/ssl/certs/devops.crt`, владелец `root:root`, права `644`, поле SAN `DNS:devops.local`.
+- Закрытый ключ: `/etc/ssl/private/devops.key`, владелец `root:root`, права `600`. Ключ не копируется за пределы `/etc/ssl/private` и не добавляется в репозиторий.
+- Сертификат самоподписанный, срок действия — 365 дней. Заголовок HSTS не добавляется.
+
+Команда формирования сертификата:
+
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key \
+  -out /etc/ssl/certs/devops.crt \
+  -subj "/CN=devops.local" \
+  -addext "subjectAltName=DNS:devops.local"
+```
+
+Конфигурация ресурса: блок для порта 80 перенаправляет запросы кодом `301` на HTTPS; блок для порта 443 использует сертификат и ключ, протоколы `TLSv1.2` и `TLSv1.3`, корень `/var/www/devops-site`, `index.html` и собственную страницу `404.html`. Журналы ресурса: `/var/log/nginx/devops-site.access.log` и `/var/log/nginx/devops-site.error.log`.
+
+Применение конфигурации выполняется только после проверки синтаксиса:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Доверие к самоподписанному сертификату на хосте обеспечивается его получением по SSH и явным указанием клиенту:
+
+```bash
+scp devops:/etc/ssl/certs/devops.crt ~/devops.crt
+curl --cacert ~/devops.crt -I https://devops.local
+```
+
+Доставка содержимого выполняется сценарием `scripts/deploy.sh`: он проверяет наличие `site/index.html`, отсутствие незафиксированных изменений Git, синхронизирует каталог `site/` с правами `D755,F644`, затем проверяет HTTPS с проверкой сертификата. Пробный запуск: `scripts/deploy.sh --dry-run`. Эквивалентная команда rsync:
+
+```bash
+rsync -avz --delete --chmod=D755,F644 \
+  -e "ssh -o BatchMode=yes -o ConnectTimeout=5" \
+  site/ devops:/var/www/devops-site/
+```
+
+Состояние после настройки фиксируется снимком `04-nginx-https`.
+
+## 9. Контейнеризация (практическая работа № 7)
+
+Это план конфигурации. Проверка 21.10.2026 обнаружила, что на доступной ВМ Docker и каталог `/home/devops/app` отсутствуют. Применение настроек ниже пока не подтверждено.
+
+- Docker Engine устанавливается из официального репозитория Docker для Ubuntu; служба: `docker.service`.
+- Версия сервера фиксируется по команде `docker version --format '{{.Server.Version}}'` перед сдачей отчёта. Для контрольной работы № 2 требуется версия не ниже 28.0.
+- Пользователь деплоя: `devops`; перед использованием Docker проверьте его членство в группе `docker` командой `id devops`.
+- Каталог проекта на сервере: `/home/devops/app`.
+- Файл `/home/devops/app/.env` содержит параметры PostgreSQL и имеет владельца `devops`, права `600`. Файл не переносится с хостовой системы и исключён из Git и контекста сборки.
+- Приложение публикуется на `127.0.0.1:5000`; порт PostgreSQL `5432` не публикуется.
+- Сеть Compose: `backend`. Именованный том `app_db_data` подключён к `/var/lib/postgresql/data` контейнера PostgreSQL.
+- Сервисы Compose перезапускаются с политикой `unless-stopped`; приложение ожидает состояние `healthy` сервиса `db`.
+- Обратный прокси: в HTTPS-блоке `/etc/nginx/sites-available/devops-site` location `/app/` направляет запросы на `http://127.0.0.1:5000/` и передаёт заголовки `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`. После проверки `sudo nginx -t` применяется `sudo systemctl reload nginx`.
+- Перед окончательной сдачей замените сведения о версии Docker и группе `devops` фактическим выводом команд на сервере.
+
+## 10. Восстановление после отката на снимок 01-clean-install
 
 Откат возвращает машину к состоянию после установки: пользователя `devops`, ключей, усиления SSH, UFW и имени узла нет, а проброс портов может вернуться к гостевому порту 22. Порядок восстановления:
 
@@ -97,27 +159,6 @@
 7. Проверить конфигурацию `sudo sshd -t`, затем отключить сокет и включить службу: `sudo systemctl disable --now ssh.socket`, `sudo systemctl enable --now ssh.service`, `sudo systemctl restart ssh`.
 8. Задать имя узла и запись hosts: `sudo hostnamectl set-hostname devops-vm`; в `/etc/hosts` добавить `127.0.1.1 devops-vm.devops.local devops-vm`.
 9. Настроить UFW в безопасном порядке: `sudo ufw allow 2222/tcp`, `sudo ufw allow 80/tcp`, `sudo ufw allow 443/tcp`, `sudo ufw default deny incoming`, `sudo ufw default allow outgoing`, `sudo ufw enable`, `sudo ufw delete allow 2222/tcp`, `sudo ufw limit 2222/tcp comment 'SSH rate-limited'`, `sudo ufw logging medium`.
-10. Проверить результат: `sudo sshd -T`, `sudo ss -tlnp | grep sshd`, `sudo ufw status verbose`, `hostname -f`, `ssh devops.local 'whoami; hostname -f'`, `bash scripts/audit.sh` (код возврата 0); при необходимости создать снимок `04-restored`.
+10. Проверить результат: `sudo sshd -T`, `sudo ss -tlnp | grep sshd`, `sudo ufw status verbose`, `hostname -f`, `ssh devops.local 'whoami; hostname -f'`, `bash scripts/audit.sh`; код возврата 0 достигается после настройки веб-сервера (раздел 8) и контейнеризации (раздел 9), иначе соответствующие проверки завершатся ошибкой. При необходимости создать снимок `04-restored`.
 
 Ориентировочное время восстановления — 10–15 минут.
-
-## 8. Веб-сервер
-
-- Пакет: `nginx` из репозитория Ubuntu; служба: `nginx.service`.
-- Конфигурация ресурса: `/etc/nginx/sites-available/devops-site`; активная ссылка: `/etc/nginx/sites-enabled/devops-site`. Стандартная ссылка `default` отключена.
-- Имя ресурса: `devops.local`; каталог сайта: `/var/www/devops-site`, владелец `devops:devops`.
-- Права каталога сайта: `755`; права файлов: `644`. Пользователь рабочих процессов Nginx (`www-data`) имеет чтение и проход, но не запись.
-- Сертификат: `/etc/ssl/certs/devops.crt`, права `644`; закрытый ключ: `/etc/ssl/private/devops.key`, владелец `root:root`, права `600`.
-- Сертификат самоподписанный, RSA 2048 бит, срок действия 365 дней, SAN `DNS:devops.local`. Команда формирования:
-
-  ```bash
-  sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/devops.key \\
-    -out /etc/ssl/certs/devops.crt \\
-    -subj "/CN=devops.local" \\
-    -addext "subjectAltName=DNS:devops.local"
-  ```
-
-- Блок HTTP перенаправляет запросы на `https://$host$request_uri` кодом 301. HTTPS-блок использует TLS 1.2/1.3 и собственные журналы `/var/log/nginx/devops-site.access.log` и `/var/log/nginx/devops-site.error.log`.
-- После изменения конфигурации: `sudo nginx -t && sudo systemctl reload nginx`.
-- Для восстановления полного состояния см. шаги в этом разделе и снимок `04-nginx-https`.
