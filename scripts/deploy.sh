@@ -45,6 +45,20 @@ if [[ ! -r "$CA_CERT" ]]; then
     exit 1
 fi
 
-rsync "${RSYNC_ARGS[@]}" "$LOCAL_DIR" "${REMOTE}:${REMOTE_DIR}/"
-curl --fail --silent --show-error --cacert "$CA_CERT" "$SITE_URL" --output /dev/null
+if ! rsync "${RSYNC_ARGS[@]}" "$LOCAL_DIR" "${REMOTE}:${REMOTE_DIR}/"; then
+    echo "Ошибка синхронизации; доставка не завершена." >&2
+    exit 1
+fi
+
+# Явная запись hosts исключает конфликт .local с mDNS на macOS.
+# Проверка имени SAN и доверия к сертификату сохраняется.
+SITE_IP="${DEPLOY_SITE_IP:-$(awk '$1 !~ /^#/ {for (i=2;i<=NF;i++) if ($i=="devops.local") {print $1;exit}}' /etc/hosts)}"
+CURL_ARGS=(--fail --silent --show-error --connect-timeout 5 --max-time 15 --cacert "$CA_CERT")
+if [[ -n "$SITE_IP" ]]; then
+    CURL_ARGS+=(--resolve "devops.local:443:${SITE_IP}")
+fi
+if ! curl "${CURL_ARGS[@]}" "$SITE_URL" --output /dev/null; then
+    echo "Ошибка проверки HTTPS после доставки." >&2
+    exit 1
+fi
 printf 'Деплой выполнен успешно. Коммит: %s\n' "$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
